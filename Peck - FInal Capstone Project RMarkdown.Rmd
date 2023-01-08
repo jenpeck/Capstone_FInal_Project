@@ -1,0 +1,559 @@
+---
+title: "Peck - Final Capstone Project"
+author: "Jennifer Peck"
+date: "2023-01-07"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+```
+
+## Introduction
+
+For my final project in the Data Science certification course, I decided to use
+a data set that was pertaining to student loans. Not only is this pertinent to 
+me as a student myself, but it is also the industry I have worked in for the 
+past 20 years. On Kaggle, I was able to find a data set that is a scrape of 
+COD (Common Origination and Disbursement) for the 2020-2021 academic school year.
+COD is a website used by the Department of Education, student loan servicers, 
+schools, and students to track loan information. 
+
+This data set is focused to school level items. There is information about what 
+type of school each is, where it is located, the number of recipients of loans, 
+as well as the number of loans and dollar amounts for both originations and 
+disbursements. For this project, I am going to focus on originations as that is 
+the picture of the total loan debt taken out. I am going to view and present the
+data by modeling different methods of query and graphing, and determine if I 
+locate any trends. This trending data may be on type of school, state location, 
+or loan type. I will present the results in multiple formats, utilizing both 
+tables and graphs. Let's take a look!
+
+## Methods and Analysis
+
+### Set-Up
+
+To get started, I need to download the data set into R, and get it into a format
+that will make it easier to use going forward. I also want to make sure I have 
+all the various library packages installed and loaded. The file on Kaggle is 
+called "The schools that create the most student debt", which I am renaming to
+simply "debt". 
+
+```{r, echo=FALSE}
+#Loading needed packages
+
+if(!require(tidyverse)) install.packages("tidyverse", repos = "http://cran.us.r-project.org")
+if(!require(caret)) install.packages("caret", repos = "http://cran.us.r-project.org")
+if(!require(readr)) install.packages("readr", repos = "http://cran.us.r-project.org")
+if(!require(dplyr)) install.packages("dplyr", repos = "http://cran.us.r-project.org")
+if(!require(ggplot2)) install.packages("ggplot2", repos = "http://cran.us.r-project.org")
+if(!require(ggrepel)) install.packages("ggrepel", repos = "http://cran.us.r-project.org")
+library(tidyverse)
+library(caret)
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(ggrepel)
+
+#Kaggle data set "The schools that create the most student debt"
+#https://www.kaggle.com/datasets/thedevastator/the-schools-that-create-the-most-student-debt
+#https://github.com/jenpeck/Capstone_Final_Project.git
+
+options(timeout = 120)
+dl <- "Student Loan Debt by School 2020-2021.csv"
+if(!file.exists(dl))
+  download.file("https://github.com/jenpeck/Capstone_Final_Project/blob/main/
+                Student%20Loan%20Debt%20by%20School%202020-2021.csv", dl)
+
+
+#this takes the csv and gives it an easier alias
+debt <- read.csv("Student Loan Debt by School 2020-2021.csv")
+```
+
+I want to take a quick look at what we are starting with. First, I determine 
+the class type of my file is a data frame, and I look at an example of the 
+structure. I see that there are 42765 objects and 13 variables.
+
+```{r, echo=FALSE}
+#This looks at the class type and what the data frame looks like
+class(debt)
+str(debt)
+```
+
+
+I decided to rename all of the columns as some of them have special characters
+that I don't want to deal with.
+
+```{r}
+#The original csv has special characters in some of the column names so I want
+#to rename the columns for ease going forward
+names(debt)[1] <- 'index'
+names(debt)[2] <- 'opeid'
+names(debt)[3] <- 'school'
+names(debt)[4] <- 'city'
+names(debt)[5] <- 'state'
+names(debt)[6] <- 'zip'
+names(debt)[7] <- 'school_type'
+names(debt)[8] <- 'loan_type'
+names(debt)[9] <- 'num_recipients'
+names(debt)[10] <- 'num_loans_originated'
+names(debt)[11] <- 'dollars_originated'
+names(debt)[12] <- 'num_disbursements'
+names(debt)[13] <- 'dollars_disbursed'
+
+#check to make sure the columns are renamed
+colnames(debt)
+```
+
+
+
+I want to view a tibble of this data frame to see if it is getting into shape. 
+It's starting to look pretty good!
+
+```{r, echo=FALSE}
+#get a look at the table
+debt %>% as_tibble()
+```
+\newpage
+Now I want to start getting an idea of some of my populations. Based on this 
+summary, I have 4078 schools, 7 loan types, and 8 school types.
+
+```{r, echo=FALSE}
+#look at a summary of some of the table items. 
+table1 <- debt %>% summarize(distinct_schools = n_distinct(school), 
+                  distinct_loantype = n_distinct(loan_type),
+                  distinct_schooltype = n_distinct(school_type))
+knitr::kable(table1 ,caption = "Summary")
+```
+
+Let's check out the loan types: 
+
+```{r, echo=FALSE}
+#what are the 7 loan types and counts of how many rows each 
+table2 <- debt %>% group_by(loan_type) %>% summarize(count = n()) %>% 
+  arrange(desc(count))
+knitr::kable(table2 ,caption = "Loan Types and #Rows")
+```
+
+This brings up a few interesting points. I see there are 25 rows that have no 
+loan type, the count of the labeled loan types are all equal, and there is a 
+huge number under 'total'. I will deal with the blanks in a bit and I assume the 
+number of each loan type is even because there is a line item for each type, 
+whether the school reported any info there or not. First though, I am curious
+about what the 'totals' are. I am going to narrow down to looking at only the 
+info for one school to try and figure it out. 
+
+```{r}
+debt %>% filter(school == 'UNIVERSITY OF ALABAMA')
+```
+
+It appears that one of the total lines is the sum of the values 
+of the other loan types added together. I cannot determine what the other 4 
+total lines are showing. To have it not skew my results going forward, I am 
+going to throw out all of the rows in the set with a loan type of 'total'. I am 
+also going to throw out the 25 loans with no loan type. I will call this new 
+result 'clean_debt'. 
+
+```{r}
+clean_debt <- debt %>% filter(loan_type != 'Total')
+clean_debt <- clean_debt %>% filter(loan_type != "")
+
+#make sure that I no longer show either totals or blanks
+clean_debt %>% group_by(loan_type) %>% summarize(count = n())
+
+#check to see how far row count went down
+nrow(clean_debt)
+```
+
+When I ran the first tibble of this data, it jumped out at me that one of the 
+lines showing had 0's reporting for a row - indicating that they reported their
+school's information to COD, but didn't happen to have any loans of a particular 
+type. Even though 0's won't add to my results, I am going to toss those lines as 
+well, just to make our data set as clean as possible. 
+
+```{r, echo=FALSE}
+#throw out rows with 0 recipients
+clean_debt <- clean_debt %>% filter(num_recipients != '0')
+```
+
+Finally, in terms of set up, I discovered later in my research that there are 
+schools listed in the data that are not located in America. Because I intend to
+look at trending by state, I want to remove these lines as well. An example of 
+this is shown with this school in Ireland. 
+
+```{r, echo=FALSE}
+#found this later and then decided to bring in at the beginning. Found there
+#were schools outside of usa. I want to remove those since I am going to be 
+#looking at some of the info by state. By running this example below I found 
+#that the international schools have a blank state so that is how I will filter 
+#them out
+clean_debt %>% filter(school == 'ROYAL COLLEGE OF SURGEONS IN IRELAND')
+clean_debt <- clean_debt %>% filter(state != '')
+```
+
+```{r}
+#how many rows left
+nrow(clean_debt)
+```
+
+This gets the cleaned up data down to 13283 lines. The data is now in good 
+shape and cleaned up of items that will give skewed results. 
+
+
+### Data Modeling
+
+Ok, I am ready to start looking for trends! I will split this section by looking
+for trends from four angles - school type trends, loan type trends, state trends, 
+and school trends.
+
+#### School Type  
+
+The first thing I want to check out is how many schools there are for each 
+school type. I will view this via bar graph. 
+
+```{r, echo=FALSE, fig.align='center'}
+#how many schools of each school type - graphed. Need to first make a temp table
+#so that I can narrow down to distinct schools rather than rows
+
+distinctschools <- clean_debt %>% select(school, school_type) %>%  
+  distinct(school, school_type)
+
+distinctschools %>% 
+  ggplot(aes(school_type, fill = school_type)) + 
+  geom_bar(color = "black") + 
+  theme_gray() +
+  ggtitle("Distibution of School Types") +
+  xlab("School Types") +
+  ylab("Count of Schools")
+```
+
+The graph above shows 3 school types: Private-Nonprofit, Proprietary, and Public.
+Private-Nonprofit has the most schools reporting. If you recall, before we 
+cleaned up the data, we originally had 8 school types showing. The other 5 
+that are no longer here were indicating either foreign schools, blanks, or 
+invalid information (info in wrong column). 
+
+Next, I am going to see how many loan recipients there are at each school type. 
+The results show that there are close to double the amount of recipients at 
+public schools vs private schools, even though there are more private schools on
+the list, as we saw above. 
+
+```{r, echo = FALSE, fig.align='center'}
+#how many recipients in each school type
+table3 <- clean_debt %>% group_by(school_type) %>% 
+  summarize(number_recipients = sum(num_recipients)) %>% 
+  arrange(desc(number_recipients))
+knitr::kable(table3 ,caption = "Recipients at School Types")
+```
+
+For the last portion of my review by loan type, I want to look at the amount of 
+dollars originated, by each. Here we see that the most money is in the realm of 
+public schools, but it's a lot closer to the private school amount than the
+number of recipients would lead us to believe. 
+
+```{r, echo = FALSE, fig.align='center'}
+#how much money originated by school type
+table4 <- clean_debt %>% group_by(school_type) %>% 
+  summarize(dollars_orig = sum(dollars_originated)) %>% 
+  arrange(desc(dollars_orig))
+knitr::kable(table4 ,caption = "Total Orig by School Type")
+```
+
+
+#### Loan Type  
+
+The second angle I want to look into is trends by loan type. 
+
+In the graph below, we see that the amounts of Subsidized and Unsubsidized - 
+Undergraduate loans are fairly close. This is what I would expect to see as it 
+is common for students to get both a subsidized and unsubsidized loan at the 
+same time. 
+
+```{r, echo=FALSE, fig.align='center'}
+#graph loans by loan type. first have to make a temp table to sum the number of
+#loans
+sumlnorig <- clean_debt %>% select(loan_type, num_loans_originated) %>%  
+  group_by(loan_type) %>%
+  summarize(sum_ln_orig=sum(num_loans_originated))
+
+sumlnorig %>% 
+  ggplot(aes(x=loan_type, y=sum_ln_orig)) + 
+  geom_bar(stat="identity", fill = "skyblue", color = "black", ) + 
+  geom_text(aes(label = signif(sum_ln_orig)), nudge_y = 100000) +
+  theme_gray() +
+  ggtitle("Distibution of Loan Types") +
+  theme(axis.text.x = element_text(angle = 90)) +
+  xlab("Types of Loans") +
+  ylab("Count of Loans")
+```
+
+I want to see how many loan recipients there are by each loan type. If we 
+compare this to the graph above, the counts are very close but there are more
+loans by type than there are recipients. This makes sense as some students get
+more than one loan. What we can't tell here is distinct recipient. If one 
+student got both a subsidized and unsubsidized loan, they will show up as a 
+recipient for each column. 
+
+```{r, echo = FALSE, fig.align='center'}
+#how many recipients have each loan type on the clean debt data set
+table5 <- clean_debt %>% group_by(loan_type) %>% 
+  summarize(number_recipients = sum(num_recipients)) %>%
+  arrange(desc(number_recipients))
+knitr::kable(table5 ,caption = "Recipients and Loan Types")
+```
+
+Next, let's check out the amount of money originated by each loan type. 
+Unsubsidized - Graduate is the highest dollar amount. This is likely due to the
+cost of Grad school being higher than Undergrad.
+
+```{r, echo = FALSE, fig.align='center'}
+#how much money originated by loan type
+table6 <- clean_debt %>% group_by(loan_type) %>% 
+  summarize(dollars_orig = sum(dollars_originated)) %>% 
+  arrange(desc(dollars_orig))
+knitr::kable(table6 ,caption = "Orig by Loan Type")
+```
+
+For the final look at loan types, I want to determine what the average dollar 
+amount originated by recipient is. The results show that on average, recipients 
+that take out Grad PLUS loans have the highest average loan amount. Subsidized 
+is the lowest. 
+
+```{r, echo = FALSE, fig.align='center'}
+#figure out average $ originated by recipient by loan type
+table7 <- clean_debt %>% group_by(loan_type) %>% 
+  summarize(avgorig = sum(dollars_originated)/sum(num_recipients)) %>%
+  arrange(desc(avgorig))
+knitr::kable(table7 ,caption = "Average Orig by Person and Loan Type")
+```
+
+
+#### State Information  
+
+The third angle that I would like to investigate is at the state level. I am 
+curious if there are trends of how many loans or amount of money that is 
+originated by state. 
+
+First up, I'd like to find out which 10 states have the most schools reporting 
+in this data set. California has over 1300 schools, while the next closest state
+is New York with 859.
+
+```{r, echo=FALSE, fig.align='center'}
+#how many total schools per state - top 10 states
+table8 <- clean_debt %>% count(state) %>% top_n(10, n) %>% arrange(desc(n))
+knitr::kable(table8 ,caption = "Top 10 Schools per State")
+```
+
+
+I queried how many schools, per school type, are being reported in each state. 
+This is a full look, so the table is long. 
+
+```{r, echo = FALSE, fig.align='center'}
+#how many schools by type per state
+table9 <- clean_debt %>% count(state, school_type)
+knitr::kable(table9 ,caption = "Schools, by Type, per State")
+```
+
+Now I want to look at the 10 states that have the highest number of loan 
+recipients Texas is the highest with almost 532 thousand. 
+
+```{r, echo = FALSE, fig.align='center'}
+#top 10 most recipients by state, descending
+table10 <- clean_debt %>% group_by(state) %>% 
+  summarize(number_recipients = sum(num_recipients)) %>%
+  top_n(10, number_recipients) %>% arrange(desc(number_recipients))
+knitr::kable(table10 ,caption = "Top 10 Recipients by State")
+```
+
+Here is a larger overview of recipients by state in a descending graph view.
+
+```{r, echo=FALSE, fig.align='center'}
+#graph recipients by state desc
+clean_debt %>% group_by(state) %>% 
+  summarize(number_recipients = sum(num_recipients)) %>% 
+  mutate(state = reorder(state, number_recipients)) %>%
+  ggplot(aes(state, number_recipients)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  theme(axis.text.y = element_text(size = 6)) +
+  ggtitle("Recipients by State") +
+  xlab("")
+```
+
+Next, I want to view the dollars originated by state. Here are the top 10 states
+with the highest originated amount. California lands in the top spot. 
+
+```{r, echo = FALSE, fig.align='center'}
+#figure out sum of $ originated by state - show top 10
+table11 <- clean_debt %>% group_by(state) %>% 
+  summarize(dollars_orig = sum(dollars_originated)) %>%
+  top_n(10, dollars_orig) %>% arrange(desc(dollars_orig))
+knitr::kable(table11 ,caption = "Dollars Orig per State")
+```
+ 
+Similar to before, I want to look at a descending graph by state, this time with
+a full view of total originated amounts for all states.
+
+```{r, echo=FALSE, fig.align='center'}
+#graph originations by state desc
+clean_debt %>% group_by(state) %>% 
+  summarize(dollars_orig = sum(dollars_originated)) %>% 
+  mutate(state = reorder(state, dollars_orig)) %>%
+  ggplot(aes(state, dollars_orig)) +
+  geom_bar(stat = "identity") +
+  coord_flip() +
+  theme(axis.text.y = element_text(size = 6)) +
+  ggtitle("Originations by State") +
+  xlab("")
+```
+
+I want step away from totals for a bit and look at the average amount originated 
+by recipient, by state. Interestingly, Washington DC and Puerto Rico borrow the 
+highest amount per person. 
+
+```{r, echo = FALSE, fig.align='center'}
+#figure out average $ originated by recipient by state.
+table12 <- clean_debt %>% group_by(state) %>% 
+  summarize(avgorig = sum(dollars_originated)/sum(num_recipients))  %>%
+  top_n(10, avgorig) %>% arrange(desc(avgorig))
+knitr::kable(table12 ,caption = "Average Orig, by Recipient, by State")
+```
+
+I decided to graph out this data in a different way. This makes it a little 
+easier to see that PR and DC are outliers at the high end of dollars per person,
+Guam is an outlier on the low end of the same thing. TX, CA, PA, and NY are 
+outliers in terms of the amount of people who got loans, but their average dollar
+amount falls in line with most other states. 
+
+```{r, echo=FALSE, fig.align='center'}
+#graph to show where the states land when you look at number of recipients by 
+#average dollars originated. Need to make a temp table first for the calculations
+thing <- clean_debt %>% 
+  group_by(state) %>% 
+  summarize(sumrec = sum(num_recipients), 
+            sumorig = sum(dollars_originated),
+            avgorig = sum(dollars_originated)/sum(num_recipients))              
+
+thing %>% 
+  ggplot(aes(sumrec, avgorig, label = state)) +   
+  geom_point() +
+  geom_text_repel() + 
+  xlab("Number of Recipients") + 
+  ylab("Avg Dollars Originated") +
+  ggtitle("Avg Dollars Orig by Recipient, by State") 
+```
+
+
+#### School Information  
+
+In the last section of data analysis, I am going to look at some trends by 
+individual schools. If we look at the schools with the most money originated, 
+Arizona State University landed on top. This is interesting because Arizona 
+hasn't popped up as being at the top of any of our other queries. 
+
+```{r, echo = FALSE, fig.align='center'}
+#figure out most $ originated by school - show top 10
+table13 <- clean_debt %>% group_by(school) %>% 
+  summarize(dollars_orig = sum(dollars_originated))  %>%
+  top_n(10, dollars_orig) %>% arrange(desc(dollars_orig))
+knitr::kable(table13 ,caption = "Top 10 Most Orig by School")
+```
+
+I also want to see which schools have the highest average amount originated by
+recipient. An interesting discovery here is that the top 10 are all either 
+medical schools or schools best known for their medical programs. 
+
+```{r, echo = FALSE, fig.align='center'}
+#figure out school with highest avg $ by recipient. 
+table14 <- clean_debt %>% group_by(school) %>% 
+  summarize(avgorig = sum(dollars_originated)/sum(num_recipients))  %>%
+  top_n(10, avgorig) %>% arrange(desc(avgorig))
+knitr::kable(table14 ,caption = "Schools with Highest Avg Orig by Recipient")
+```
+
+
+## Results
+
+Looking at this student loan debt by school information in multiple ways has 
+shown a number of interesting results. 
+
+ - Far more people obtain the assistance of student loans if they attend public 
+schools. This may indicate a couple of things - lower income people are more 
+likely to attend public school, or more people in general attend public school. 
+We can't determine this without data regarding total number of attendees. 
+
+ - Even though there was close to double the amount of recipients at public vs 
+private schools, the dollar amount originated was fairly close. This tells us
+that the private school students need to borrow more money, which makes sense 
+as private schools tend to have far more expensive tuition. 
+
+ - Looking at the data by loan type doesn't help to draw very many conclusions, 
+but there was one interesting result - graduate students need to borrow far
+more per person than anybody else. Unsubsidized-Graduate and Grad PLUS loans
+average out to $20-25,000 per recipient, while Unsubsidized-Undergrad and 
+Subsidized loans come out to roughly $4100 per recipient. 
+
+ - Trending by state showed that the most schools are in CA, followed by NY and 
+TX, however the state with the most students getting a loan is TX, followed by 
+CA. NY was 4th on that list. 7 of the top 10 states by number of recipients are 
+also on the list of top 10 states with the most amount of schools. The top 10
+states by recipients match the top 10 states by dollars originated. This likely
+tells us that these states aren't outliers, but simply at the top due to volume.
+
+ - When the state data was graphed by average originated dollars per recipient, 
+it was easier to find some outliers. Puerto Rico and Washington DC have a higher
+proportion of money originated per person than the rest of the group. Guam was 
+at the other end of the spectrum, with very few recipients and originated loans.
+
+ - Arizona State University was the school that originated the most amount of 
+debt. This is interesting as Arizona as a state didn't come up anywhere else 
+while we were looking at trends. It isn't in the top 10 for overall originations, 
+number of recipients or anything else, yet the school on its own originated over
+a half billion dollars in one academic year. My assumption is if we had numbers 
+of total school attendees, we would find that a higher proportion of students 
+who attend ASU borrow money than other colleges. 
+
+ - The final query regarding which schools have the highest average of dollars 
+originated by recipient was interesting, though not entirely surprising. All of 
+the top 10 schools were either medical schools, or colleges that were best known
+for their medical programs. 
+
+## Conclusion
+
+Based on this data set, if you are a student obtaining a graduate degree or a 
+medical degree, and need to borrow money in order to do it, you are going to be
+taking on a large debt. Undergraduate degrees and public schools, are likely to 
+cause less of a financial strain, though they may add up if you obtain multiple
+loans. Since this data was a snapshot of one academic year, we are unable to see
+the average amount borrowed by recipient over the length of their college degree. 
+The academic year for this data was also 2020-2021 so COVID would play a part in
+decreasing how many people went to school and needed to obtain loans. I would 
+expect that if we looked at this same data from 2018-2019, the numbers would be
+even larger. 
+
+## References
+
+The schools that create the most student debt
+Data set - Kaggle
+https://www.kaggle.com/datasets/thedevastator/the-schools-that-create-the-most-
+student-debt?resource=download
+
+Introduction to Data Science: Data Analysis and Prediciton Algorithms with R
+Rafael A. Irizarry
+http://rafalab.dfci.harvard.edu/dsbook/
+
+R Markdown Cookbook
+Yihui Xie, Christophe Dervieux, Emily Riederer
+https://bookdown.org/yihui/rmarkdown-cookbook/
+
+Github data visualization cheat sheet
+https://github.com/rstudio/cheatsheets/blob/main/data-visualization.pdf
+
+Github R markdown cheat sheet
+https://github.com/rstudio/cheatsheets/blob/main/rmarkdown.pdf
+
+My github for this project
+https://github.com/jenpeck/Capstone_Final_Project
+
+
+
